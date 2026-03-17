@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "dgSpecHash": "SRHjFOvfeRI=",
+  "success": true,
+  "projectFilePath": "C:\\Development\\UNF_MailFile_GDUpload\\UNF_MailFile_GDUpload.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\takar\\.nuget\\packages\\google.apis\\1.68.0\\google.apis.1.68.0.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\google.apis.auth\\1.68.0\\google.apis.auth.1.68.0.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\google.apis.core\\1.68.0\\google.apis.core.1.68.0.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\google.apis.drive.v3\\1.68.0.3373\\google.apis.drive.v3.1.68.0.3373.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\newtonsoft.json\\13.0.3\\newtonsoft.json.13.0.3.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\system.codedom\\7.0.0\\system.codedom.7.0.0.nupkg.sha512",
+    "C:\\Users\\takar\\.nuget\\packages\\system.management\\7.0.2\\system.management.7.0.2.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "UNF_MailFile_GDUpload は Google.Apis.Drive.v3 (>= 1.68.0) によって異なりますが、Google.Apis.Drive.v3 1.68.0 が見つかりませんでした。代わりに Google.Apis.Drive.v3 1.68.0.3373 が解決されました。",
+      "projectPath": "C:\\Development\\UNF_MailFile_GDUpload\\UNF_MailFile_GDUpload.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Development\\UNF_MailFile_GDUpload\\UNF_MailFile_GDUpload.csproj",
+      "libraryId": "Google.Apis.Drive.v3",
+      "targetGraphs": [
+        ".NETFramework,Version=v4.8",
+        ".NETFramework,Version=v4.8/win",
+        ".NETFramework,Version=v4.8/win-arm64",
+        ".NETFramework,Version=v4.8/win-x64",
+        ".NETFramework,Version=v4.8/win-x86"
+      ]
+    }
+  ]
+}

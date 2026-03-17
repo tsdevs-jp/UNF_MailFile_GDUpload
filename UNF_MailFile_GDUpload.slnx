@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="UNF_MailFile_GDUpload.csproj">
+    <BuildType Project="Release" />
+  </Project>
+</Solution>

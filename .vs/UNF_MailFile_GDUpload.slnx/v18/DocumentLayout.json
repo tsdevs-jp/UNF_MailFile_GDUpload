@@ -1,0 +1,138 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Development\\UNF_MailFile_GDUpload\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|c:\\development\\unf_mailfile_gdupload\\settingsform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:settingsform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|C:\\Development\\UNF_MailFile_GDUpload\\thisaddin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:thisaddin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|C:\\Development\\UNF_MailFile_GDUpload\\properties\\assemblyinfo.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:properties\\assemblyinfo.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|C:\\Development\\UNF_MailFile_GDUpload\\uploadprogressform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:uploadprogressform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|C:\\Development\\UNF_MailFile_GDUpload\\setup\\setup.iss||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:setup\\setup.iss||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|C:\\Development\\UNF_MailFile_GDUpload\\setup\\readme_\u30D3\u30EB\u30C9\u624B\u9806.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:setup\\readme_\u30D3\u30EB\u30C9\u624B\u9806.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|c:\\development\\unf_mailfile_gdupload\\googledriveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{7A59EF65-C8F4-40D6-9907-D357E543B348}|UNF_MailFile_GDUpload.csproj|solutionrelative:googledriveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "GoogleDriveService.cs",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\GoogleDriveService.cs",
+              "RelativeDocumentMoniker": "GoogleDriveService.cs",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\GoogleDriveService.cs",
+              "RelativeToolTip": "GoogleDriveService.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-17T06:46:24.2Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "README_\u30D3\u30EB\u30C9\u624B\u9806.md",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\Setup\\README_\u30D3\u30EB\u30C9\u624B\u9806.md",
+              "RelativeDocumentMoniker": "Setup\\README_\u30D3\u30EB\u30C9\u624B\u9806.md",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\Setup\\README_\u30D3\u30EB\u30C9\u624B\u9806.md",
+              "RelativeToolTip": "Setup\\README_\u30D3\u30EB\u30C9\u624B\u9806.md",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAEQAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-03-17T06:33:42.619Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "setup.iss",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\Setup\\setup.iss",
+              "RelativeDocumentMoniker": "Setup\\setup.iss",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\Setup\\setup.iss",
+              "RelativeToolTip": "Setup\\setup.iss",
+              "ViewState": "AgIAAOoAAAAAAAAAAAA8wOsAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-03-17T06:33:42.62Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "SettingsForm.cs",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\SettingsForm.cs",
+              "RelativeDocumentMoniker": "SettingsForm.cs",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\SettingsForm.cs",
+              "RelativeToolTip": "SettingsForm.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-17T06:33:42.638Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ThisAddIn.cs",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\ThisAddIn.cs",
+              "RelativeDocumentMoniker": "ThisAddIn.cs",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\ThisAddIn.cs",
+              "RelativeToolTip": "ThisAddIn.cs",
+              "ViewState": "AgIAAIEDAAAAAAAAAAA8wCAAAAA2AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-17T06:33:42.642Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "UploadProgressForm.cs",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\UploadProgressForm.cs",
+              "RelativeDocumentMoniker": "UploadProgressForm.cs",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\UploadProgressForm.cs",
+              "RelativeToolTip": "UploadProgressForm.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADoAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-17T06:33:42.643Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "AssemblyInfo.cs",
+              "DocumentMoniker": "C:\\Development\\UNF_MailFile_GDUpload\\Properties\\AssemblyInfo.cs",
+              "RelativeDocumentMoniker": "Properties\\AssemblyInfo.cs",
+              "ToolTip": "C:\\Development\\UNF_MailFile_GDUpload\\Properties\\AssemblyInfo.cs",
+              "RelativeToolTip": "Properties\\AssemblyInfo.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "00000000-0000-0000-0000-000000000000.000000|iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAADBSURBVDhPY2AYBQwMDAwMN17c\u002BO\u002B1yv2/4ETe/9aLLf7feHH9P7L8vHNz4XxkNhxYLzb/33yo4T8DAwND06GG/16r3FEUCU7khfOR2QwMDAyMMMH3\u002BZ8ZYYK6czX/X06\u002Bzjjv3Nz/xYcLkNXDgausO8OqoDUQPeimogN8LmBC5pADsBqgO1fzPwM0wGA2Ck7kRWGHrQtBuMRzlfv/5sONkEA83PjferEF0YHIwACNRqtF5v8FJ/L\u002B91zpRno0jnAAAA95Yu0ct6ifAAAAAElFTkSuQmCC",
+              "WhenOpened": "2026-03-17T06:33:42.644Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

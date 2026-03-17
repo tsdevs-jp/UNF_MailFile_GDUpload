@@ -1,0 +1,283 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Drive.v3;
+using Google.Apis.Drive.v3.Data;
+using Google.Apis.Services;
+using Google.Apis.Upload;
+using Google.Apis.Util.Store;
+using DriveFile = Google.Apis.Drive.v3.Data.File;
+
+namespace UNF_MailFile_GDUpload
+{
+    public sealed class GoogleDriveService
+    {
+        private const string DefaultApplicationName = "UNF MailFile GD Upload";
+        private const string TokenFolderName = "GoogleDriveToken";
+        private static readonly string[] DriveScopes = { DriveService.Scope.Drive };
+
+        private readonly string applicationName;
+        private readonly string clientId;
+        private readonly string clientSecret;
+        private readonly string tokenStoreDirectoryPath;
+
+        public GoogleDriveService()
+        {
+            this.applicationName = ConfigurationManager.AppSettings["GoogleDriveApplicationName"] ?? DefaultApplicationName;
+            this.clientId = ConfigurationManager.AppSettings["GoogleDriveClientId"] ?? string.Empty;
+            this.clientSecret = ConfigurationManager.AppSettings["GoogleDriveClientSecret"] ?? string.Empty;
+            this.tokenStoreDirectoryPath = this.InitializeSecureTokenStoreDirectory();
+        }
+
+        public bool HasRequiredClientConfiguration()
+        {
+            return !string.IsNullOrWhiteSpace(this.clientId) && !string.IsNullOrWhiteSpace(this.clientSecret);
+        }
+
+        public string GetTokenStoreDirectoryPath()
+        {
+            return this.tokenStoreDirectoryPath;
+        }
+
+        public bool HasStoredToken()
+        {
+            try
+            {
+                return Directory.Exists(this.tokenStoreDirectoryPath)
+                    && Directory.GetFiles(this.tokenStoreDirectoryPath, "*", SearchOption.TopDirectoryOnly).Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task AuthorizeAsync(CancellationToken cancellationToken)
+        {
+            await this.GetDriveApiClientAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<DriveUploadResult> UploadMailAttachmentsAsync(
+            string mailSubject,
+            string rootFolderId,
+            IEnumerable<AttachmentUploadInfo> attachments,
+            CancellationToken cancellationToken,
+            Action<string> progress = null)
+        {
+            if (attachments == null)
+            {
+                throw new ArgumentNullException(nameof(attachments));
+            }
+
+            List<AttachmentUploadInfo> attachmentList = attachments.ToList();
+            if (attachmentList.Count == 0)
+            {
+                throw new InvalidOperationException("There are no attachments available for upload.");
+            }
+
+            progress?.Invoke("Google Drive に接続・認証中...");
+            DriveService driveService = await this.GetDriveApiClientAsync(cancellationToken).ConfigureAwait(false);
+
+            progress?.Invoke("アップロード先フォルダを作成中...");
+            DriveFile folder = await this.CreateSharedFolderAsync(driveService, mailSubject, rootFolderId, cancellationToken).ConfigureAwait(false);
+
+            int total = attachmentList.Count;
+            for (int i = 0; i < total; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Invoke($"ファイルをアップロード中 ({i + 1}/{total}): {attachmentList[i].FileName}");
+                await this.UploadFileAsync(driveService, folder.Id, attachmentList[i], cancellationToken).ConfigureAwait(false);
+            }
+
+            return new DriveUploadResult
+            {
+                FolderId = folder.Id,
+                FolderName = folder.Name,
+                FolderWebViewLink = !string.IsNullOrWhiteSpace(folder.WebViewLink)
+                    ? folder.WebViewLink
+                    : "https://drive.google.com/drive/folders/" + folder.Id
+            };
+        }
+
+        private async Task<DriveService> GetDriveApiClientAsync(CancellationToken cancellationToken)
+        {
+            if (!this.HasRequiredClientConfiguration())
+            {
+                throw new InvalidOperationException("Google Drive API client settings are missing. Please review App.config appSettings.");
+            }
+
+            UserCredential credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                new ClientSecrets
+                {
+                    ClientId = this.clientId,
+                    ClientSecret = this.clientSecret
+                },
+                DriveScopes,
+                Environment.UserName,
+                cancellationToken,
+                new FileDataStore(this.tokenStoreDirectoryPath, true)).ConfigureAwait(false);
+
+            return new DriveService(
+                new BaseClientService.Initializer
+                {
+                    HttpClientInitializer = credential,
+                    ApplicationName = this.applicationName
+                });
+        }
+
+        private async Task<DriveFile> CreateSharedFolderAsync(DriveService driveService, string subject, string rootFolderId, CancellationToken cancellationToken)
+        {
+            string folderName = this.BuildFolderName(subject);
+            DriveFile folderMetadata = new DriveFile
+            {
+                Name = folderName,
+                MimeType = "application/vnd.google-apps.folder",
+                Parents = string.IsNullOrWhiteSpace(rootFolderId)
+                    ? null
+                    : new List<string> { rootFolderId }
+            };
+
+            FilesResource.CreateRequest createFolderRequest = driveService.Files.Create(folderMetadata);
+            createFolderRequest.Fields = "id,name,webViewLink";
+
+            DriveFile createdFolder = await createFolderRequest.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+            Permission permission = new Permission
+            {
+                Role = "reader",
+                Type = "anyone"
+            };
+
+            PermissionsResource.CreateRequest createPermissionRequest = driveService.Permissions.Create(permission, createdFolder.Id);
+            createPermissionRequest.Fields = "id";
+            await createPermissionRequest.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+            FilesResource.GetRequest getFolderRequest = driveService.Files.Get(createdFolder.Id);
+            getFolderRequest.Fields = "id,name,webViewLink";
+            return await getFolderRequest.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task UploadFileAsync(DriveService driveService, string parentFolderId, AttachmentUploadInfo attachment, CancellationToken cancellationToken)
+        {
+            if (attachment == null)
+            {
+                throw new ArgumentNullException(nameof(attachment));
+            }
+
+            if (string.IsNullOrWhiteSpace(attachment.TemporaryFilePath) || !System.IO.File.Exists(attachment.TemporaryFilePath))
+            {
+                throw new FileNotFoundException("The exported temporary attachment file was not found.", attachment?.TemporaryFilePath);
+            }
+
+            DriveFile fileMetadata = new DriveFile
+            {
+                Name = attachment.FileName,
+                Parents = new List<string> { parentFolderId }
+            };
+
+            using (FileStream stream = new FileStream(attachment.TemporaryFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                FilesResource.CreateMediaUpload uploadRequest = driveService.Files.Create(fileMetadata, stream, "application/octet-stream");
+                uploadRequest.Fields = "id,name,webViewLink";
+                IUploadProgress uploadProgress = await uploadRequest.UploadAsync(cancellationToken).ConfigureAwait(false);
+
+                if (uploadProgress.Status != UploadStatus.Completed)
+                {
+                    throw uploadProgress.Exception ?? new InvalidOperationException("The Google Drive file upload did not complete successfully.");
+                }
+            }
+        }
+
+        private string BuildFolderName(string subject)
+        {
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            string safeSubject = string.IsNullOrWhiteSpace(subject) ? "NoSubject" : subject.Trim();
+
+            // 件名中の使用不可文字（[ ] _ #）を " に変換する
+            safeSubject = safeSubject.Replace('[', '"')
+                                     .Replace(']', '"')
+                                     .Replace('_', '"')
+                                     .Replace('#', '"');
+
+            // その他のファイル名として使用できない文字（" は変換済みのため除外）を _ に変換する
+            foreach (char invalidCharacter in Path.GetInvalidFileNameChars())
+            {
+                if (invalidCharacter != '"')
+                {
+                    safeSubject = safeSubject.Replace(invalidCharacter, '_');
+                }
+            }
+
+            if (safeSubject.Length > 120)
+            {
+                safeSubject = safeSubject.Substring(0, 120);
+            }
+
+            return timestamp + "_" + safeSubject;
+        }
+
+        private string InitializeSecureTokenStoreDirectory()
+        {
+            string appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string applicationDirectory = Path.Combine(appDataDirectory, "UNF_MailFile_GDUpload");
+            string tokenDirectory = Path.Combine(applicationDirectory, TokenFolderName);
+
+            if (!Directory.Exists(tokenDirectory))
+            {
+                Directory.CreateDirectory(tokenDirectory);
+            }
+
+            try
+            {
+                DirectoryInfo directoryInfo = new DirectoryInfo(tokenDirectory);
+                DirectorySecurity directorySecurity = directoryInfo.GetAccessControl();
+                directorySecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+                SecurityIdentifier currentUserSid = WindowsIdentity.GetCurrent().User;
+                if (currentUserSid != null)
+                {
+                    FileSystemAccessRule fullControlRule = new FileSystemAccessRule(
+                        currentUserSid,
+                        FileSystemRights.FullControl,
+                        InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                        PropagationFlags.None,
+                        AccessControlType.Allow);
+
+                    directorySecurity.ResetAccessRule(fullControlRule);
+                    directoryInfo.SetAccessControl(directorySecurity);
+                }
+            }
+            catch
+            {
+            }
+
+            return tokenDirectory;
+        }
+    }
+
+    public sealed class AttachmentUploadInfo
+    {
+        public int OriginalIndex { get; set; }
+
+        public string FileName { get; set; }
+
+        public string TemporaryFilePath { get; set; }
+    }
+
+    public sealed class DriveUploadResult
+    {
+        public string FolderId { get; set; }
+
+        public string FolderName { get; set; }
+
+        public string FolderWebViewLink { get; set; }
+    }
+}

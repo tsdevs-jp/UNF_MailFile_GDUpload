@@ -26,6 +26,10 @@ namespace UNF_MailFile_GDUpload
         {
             this.txtRootFolderId.Text = Properties.Settings.Default.GoogleDriveRootFolderId ?? string.Empty;
             this.txtTokenPath.Text = this.googleDriveService.GetTokenStoreDirectoryPath();
+            this.chkEnablePasswordZipWorkflow.Checked = Properties.Settings.Default.EnablePasswordZipWorkflow;
+            this.chkZipUseAesEncryption.Checked = Properties.Settings.Default.ZipUseAesEncryption;
+            this.chkZipValidateAfterCreate.Checked = Properties.Settings.Default.ZipValidateAfterCreate;
+            this.chkZipNormalizeEntryNameToAscii.Checked = Properties.Settings.Default.ZipNormalizeEntryNameToAscii;
 
             this.lblClientConfigStatusValue.Text = this.googleDriveService.HasRequiredClientConfiguration()
                 ? "client_id / client_secret 設定済み"
@@ -80,6 +84,10 @@ namespace UNF_MailFile_GDUpload
         private void btnSave_Click(object sender, EventArgs e)
         {
             Properties.Settings.Default.GoogleDriveRootFolderId = this.txtRootFolderId.Text.Trim();
+            Properties.Settings.Default.EnablePasswordZipWorkflow = this.chkEnablePasswordZipWorkflow.Checked;
+            Properties.Settings.Default.ZipUseAesEncryption = this.chkZipUseAesEncryption.Checked;
+            Properties.Settings.Default.ZipValidateAfterCreate = this.chkZipValidateAfterCreate.Checked;
+            Properties.Settings.Default.ZipNormalizeEntryNameToAscii = this.chkZipNormalizeEntryNameToAscii.Checked;
             Properties.Settings.Default.Save();
 
             this.DialogResult = DialogResult.OK;
@@ -116,6 +124,11 @@ namespace UNF_MailFile_GDUpload
             this.btnAuthenticate.Enabled = !isBusy;
             this.btnSave.Enabled = !isBusy;
             this.btnCancel.Enabled = !isBusy;
+            this.btnOpenLog.Enabled = !isBusy;
+            this.chkEnablePasswordZipWorkflow.Enabled = !isBusy;
+            this.chkZipUseAesEncryption.Enabled = !isBusy;
+            this.chkZipValidateAfterCreate.Enabled = !isBusy;
+            this.chkZipNormalizeEntryNameToAscii.Enabled = !isBusy;
             this.txtRootFolderId.Enabled = !isBusy;
             this.lblDescription.Text = statusText;
         }
@@ -166,6 +179,11 @@ namespace UNF_MailFile_GDUpload
             {
                 label.ForeColor = label == this.lblDescription ? mutedTextColor : textColor;
                 label.BackColor = Color.Transparent;
+            }
+            else if (control is CheckBox checkBox)
+            {
+                checkBox.ForeColor = textColor;
+                checkBox.BackColor = Color.Transparent;
             }
             else if (control is GroupBox groupBox)
             {

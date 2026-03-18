@@ -38,5 +38,65 @@ namespace UNF_MailFile_GDUpload.Properties
                 this["GoogleDriveRootFolderId"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool EnablePasswordZipWorkflow
+        {
+            get
+            {
+                return (bool)this["EnablePasswordZipWorkflow"];
+            }
+            set
+            {
+                this["EnablePasswordZipWorkflow"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ZipUseAesEncryption
+        {
+            get
+            {
+                return (bool)this["ZipUseAesEncryption"];
+            }
+            set
+            {
+                this["ZipUseAesEncryption"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool ZipValidateAfterCreate
+        {
+            get
+            {
+                return (bool)this["ZipValidateAfterCreate"];
+            }
+            set
+            {
+                this["ZipValidateAfterCreate"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ZipNormalizeEntryNameToAscii
+        {
+            get
+            {
+                return (bool)this["ZipNormalizeEntryNameToAscii"];
+            }
+            set
+            {
+                this["ZipNormalizeEntryNameToAscii"] = value;
+            }
+        }
     }
 }

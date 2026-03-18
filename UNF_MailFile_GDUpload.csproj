@@ -34,7 +34,7 @@
     <PublishUrl>C:\Development\Release\UNF_MailFile_GDUpload\</PublishUrl>
     <InstallUrl />
     <TargetCulture>ja</TargetCulture>
-    <ApplicationVersion>1.0.0.20</ApplicationVersion>
+    <ApplicationVersion>1.0.0.27</ApplicationVersion>
     <AutoIncrementApplicationRevision>true</AutoIncrementApplicationRevision>
     <UpdateEnabled>true</UpdateEnabled>
     <UpdateInterval>7</UpdateInterval>
@@ -234,6 +234,9 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <EmbeddedResource Include="SettingsForm.resx">
+      <DependentUpon>SettingsForm.cs</DependentUpon>
+    </EmbeddedResource>
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -280,6 +283,7 @@
   <ItemGroup>
     <PackageReference Include="Google.Apis.Drive.v3" Version="1.68.0" />
     <PackageReference Include="Google.Apis.Auth" Version="1.68.0" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- Include additional build rules for an Office application add-in. -->

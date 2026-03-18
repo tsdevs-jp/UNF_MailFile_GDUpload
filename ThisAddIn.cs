@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -7,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using ICSharpCode.SharpZipLib.Zip;
 using Microsoft.Office.Core;
 using Microsoft.Win32;
 using Outlook = Microsoft.Office.Interop.Outlook;
@@ -15,9 +17,17 @@ namespace UNF_MailFile_GDUpload
 {
     public partial class ThisAddIn
     {
+        private enum SendProcessingMode
+        {
+            GoogleDrive,
+            EncryptedZipAttachment
+        }
+
         private const string SkipProcessingUserPropertyName = "UNFGDUploadSkip";
         private const string ProcessingUserPropertyName = "UNFGDUploadProcessing";
         private const string OutlookMaximumAttachmentSizeValueName = "MaximumAttachmentSize";
+        private const string ZipPasswordPrefix = "UNF-";
+        private const int ZipPasswordDigits = 8;
         private const string AttachmentHiddenPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B";
         private const string AttachmentContentIdPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x3712001F";
         private const string AttachmentFlagsPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x37140003";
@@ -40,6 +50,38 @@ namespace UNF_MailFile_GDUpload
         private RegistryValueKind? originalMaximumAttachmentSizeValueKind;
         private bool hadMaximumAttachmentSizeValue;
         private bool attachmentLimitOverrideApplied;
+
+        private bool IsPasswordZipWorkflowEnabled
+        {
+            get
+            {
+                return Properties.Settings.Default.EnablePasswordZipWorkflow;
+            }
+        }
+
+        private bool UseAesZipEncryption
+        {
+            get
+            {
+                return Properties.Settings.Default.ZipUseAesEncryption;
+            }
+        }
+
+        private bool ValidateZipAfterCreate
+        {
+            get
+            {
+                return Properties.Settings.Default.ZipValidateAfterCreate;
+            }
+        }
+
+        private bool NormalizeZipEntryNameToAscii
+        {
+            get
+            {
+                return Properties.Settings.Default.ZipNormalizeEntryNameToAscii;
+            }
+        }
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
@@ -98,8 +140,8 @@ namespace UNF_MailFile_GDUpload
                 WriteLog("ItemSend: 処理中フラグあり → 待機ダイアログ表示");
                 cancel = true;
                 MessageBox.Show(
-                    "このメッセージは現在 Google Drive にアップロード中です。完了までお待ちください。",
-                    "アップロード処理中",
+                    "このメッセージは現在処理中です。完了までお待ちください。",
+                    "処理中",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
@@ -130,7 +172,21 @@ namespace UNF_MailFile_GDUpload
                 return;
             }
 
-            if (!this.googleDriveService.HasRequiredClientConfiguration())
+            if (this.ContainsPassThroughArchiveAttachment(uploadableAttachments))
+            {
+                WriteLog("ItemSend: .zip/.7z 添付あり → 規定によりそのまま送信");
+                return;
+            }
+
+            SendProcessingMode mode = this.PromptSendProcessingMode();
+            if (mode != SendProcessingMode.GoogleDrive && mode != SendProcessingMode.EncryptedZipAttachment)
+            {
+                cancel = true;
+                WriteLog("ItemSend: ユーザーが送信を中止");
+                return;
+            }
+
+            if (mode == SendProcessingMode.GoogleDrive && !this.googleDriveService.HasRequiredClientConfiguration())
             {
                 WriteLog("ItemSend: client_id/client_secret 未設定 → 設定画面");
                 cancel = true;
@@ -144,18 +200,18 @@ namespace UNF_MailFile_GDUpload
             }
 
             cancel = true;
-            WriteLog("ItemSend: cancel=True、処理開始");
+            WriteLog("ItemSend: cancel=True、処理開始 Mode=" + mode);
 
             MailSendOperationContext operationContext;
             try
             {
-                operationContext = this.CreateOperationContext(mailItem, uploadableAttachments);
+                operationContext = this.CreateOperationContext(mailItem, uploadableAttachments, mode);
             }
             catch (Exception ex)
             {
                 WriteLog("ItemSend: CreateOperationContext 例外 → " + ex.Message);
                 MessageBox.Show(
-                    "添付ファイルの一時フォルダへのエクスポート中にエラーが発生しました。" + Environment.NewLine + ex.Message,
+                    "添付ファイルの一時処理中にエラーが発生しました。" + Environment.NewLine + ex.Message,
                     "送信前処理エラー",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -167,8 +223,6 @@ namespace UNF_MailFile_GDUpload
                 this.processingOperations[operationContext.OperationId] = operationContext;
             }
 
-            WriteLog("ItemSend: アップロードタスク開始 OperationId=" + operationContext.OperationId);
-
             try
             {
                 this.SetProcessingFlag(mailItem, true);
@@ -179,6 +233,13 @@ namespace UNF_MailFile_GDUpload
                 WriteLog("ItemSend: SetProcessingFlag 例外（継続） → " + ex.Message);
             }
 
+            if (mode == SendProcessingMode.EncryptedZipAttachment)
+            {
+                this.ExecuteEncryptedZipAttachmentSend(operationContext);
+                return;
+            }
+
+            WriteLog("ItemSend: アップロードタスク開始 OperationId=" + operationContext.OperationId);
             UploadProgressForm progressForm = new UploadProgressForm();
             IntPtr ownerHandle = GetForegroundWindow();
             progressForm.Show(ownerHandle != IntPtr.Zero ? (IWin32Window)new Win32Window(ownerHandle) : null);
@@ -250,7 +311,7 @@ namespace UNF_MailFile_GDUpload
                 WriteLog("CompleteMailSendSuccess: 本文 URL 挿入完了");
 
                 operationContext.ProgressForm?.UpdateStatus("添付ファイルを削除中...");
-                this.RemoveUploadedAttachments(operationContext.MailItem, operationContext.Attachments);
+                this.RemoveUploadedAttachments(operationContext.MailItem, operationContext.OriginalAttachments ?? operationContext.Attachments);
                 WriteLog("CompleteMailSendSuccess: 添付ファイル削除完了");
 
                 this.SetProcessingFlag(operationContext.MailItem, false);
@@ -261,6 +322,11 @@ namespace UNF_MailFile_GDUpload
                 WriteLog("CompleteMailSendSuccess: Save 完了、Send 実行");
                 operationContext.MailItem.Send();
                 WriteLog("CompleteMailSendSuccess: Send 完了");
+
+                if (this.IsPasswordZipWorkflowEnabled && !string.IsNullOrWhiteSpace(operationContext.ZipPassword))
+                {
+                    this.CreatePasswordNotificationDraft(operationContext);
+                }
             }
             catch (Exception ex)
             {
@@ -327,26 +393,32 @@ namespace UNF_MailFile_GDUpload
             this.ReleaseOperation(operationContext);
         }
 
-        private MailSendOperationContext CreateOperationContext(Outlook.MailItem mailItem, IList<AttachmentUploadInfo> uploadableAttachments)
+        private MailSendOperationContext CreateOperationContext(Outlook.MailItem mailItem, IList<AttachmentUploadInfo> uploadableAttachments, SendProcessingMode mode)
         {
             string operationId = Guid.NewGuid().ToString("N");
             string temporaryRootDirectory = Path.Combine(Path.GetTempPath(), "UNF_MailFile_GDUpload", operationId);
             Directory.CreateDirectory(temporaryRootDirectory);
 
-            // ItemSend 発火時点では添付データが COM オブジェクトに完全にロードされていない場合がある。
-            // Save() を呼ぶことで添付データを確実にマテリアライズし、SaveAsFile の失敗を防ぐ。
             mailItem.Save();
+
+            string originalSubject = mailItem.Subject ?? string.Empty;
+            string originalTo = mailItem.To ?? string.Empty;
+            string originalCc = mailItem.CC ?? string.Empty;
+            string originalBcc = mailItem.BCC ?? string.Empty;
+            Outlook.OlBodyFormat originalBodyFormat = mailItem.BodyFormat;
+
+            List<AttachmentUploadInfo> exportedOriginalAttachments = new List<AttachmentUploadInfo>();
 
             foreach (AttachmentUploadInfo attachment in uploadableAttachments)
             {
                 string sanitizedFileName = this.BuildUniqueSafeFileName(temporaryRootDirectory, attachment.FileName);
-                attachment.TemporaryFilePath = Path.Combine(temporaryRootDirectory, sanitizedFileName);
+                string temporaryFilePath = Path.Combine(temporaryRootDirectory, sanitizedFileName);
 
                 Outlook.Attachment outlookAttachment = null;
                 try
                 {
                     outlookAttachment = mailItem.Attachments[attachment.OriginalIndex];
-                    outlookAttachment.SaveAsFile(attachment.TemporaryFilePath);
+                    outlookAttachment.SaveAsFile(temporaryFilePath);
                 }
                 finally
                 {
@@ -355,15 +427,53 @@ namespace UNF_MailFile_GDUpload
                         Marshal.ReleaseComObject(outlookAttachment);
                     }
                 }
+
+                exportedOriginalAttachments.Add(new AttachmentUploadInfo
+                {
+                    OriginalIndex = attachment.OriginalIndex,
+                    FileName = attachment.FileName,
+                    TemporaryFilePath = temporaryFilePath
+                });
+            }
+
+            string zipPassword = string.Empty;
+            string zipFileName = string.Empty;
+            List<AttachmentUploadInfo> processingAttachments = exportedOriginalAttachments;
+
+            if (mode == SendProcessingMode.EncryptedZipAttachment)
+            {
+                zipPassword = this.GenerateZipPassword();
+                zipFileName = this.BuildZipFileName(mailItem.Subject);
+                string zipFilePath = Path.Combine(temporaryRootDirectory, zipFileName);
+
+                this.CreatePasswordProtectedZip(exportedOriginalAttachments, zipFilePath, zipPassword);
+
+                processingAttachments = new List<AttachmentUploadInfo>
+                {
+                    new AttachmentUploadInfo
+                    {
+                        OriginalIndex = 0,
+                        FileName = zipFileName,
+                        TemporaryFilePath = zipFilePath
+                    }
+                };
             }
 
             return new MailSendOperationContext
             {
                 OperationId = operationId,
+                Mode = mode,
                 MailItem = mailItem,
-                Subject = mailItem.Subject,
-                Attachments = uploadableAttachments.ToList(),
-                TemporaryRootDirectory = temporaryRootDirectory
+                Subject = originalSubject,
+                Attachments = processingAttachments,
+                OriginalAttachments = uploadableAttachments.ToList(),
+                TemporaryRootDirectory = temporaryRootDirectory,
+                ZipPassword = zipPassword,
+                ZipFileName = zipFileName,
+                OriginalTo = originalTo,
+                OriginalCc = originalCc,
+                OriginalBcc = originalBcc,
+                OriginalBodyFormat = originalBodyFormat
             };
         }
 
@@ -387,7 +497,14 @@ namespace UNF_MailFile_GDUpload
 
             if (operationContext.MailItem != null)
             {
-                this.SetProcessingFlag(operationContext.MailItem, false);
+                try
+                {
+                    this.SetProcessingFlag(operationContext.MailItem, false);
+                }
+                catch (Exception ex)
+                {
+                    WriteLog("ReleaseOperation: SetProcessingFlag 例外（無視） → " + ex.Message);
+                }
             }
 
             operationContext.MailItem = null;
@@ -637,6 +754,241 @@ namespace UNF_MailFile_GDUpload
             }
         }
 
+        private string GenerateZipPassword()
+        {
+            Random random = new Random(Guid.NewGuid().GetHashCode());
+            int number = random.Next(0, 100000000);
+            return ZipPasswordPrefix + number.ToString("D" + ZipPasswordDigits.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        }
+
+        private string BuildZipFileName(string subject)
+        {
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            string safeSubject = string.IsNullOrWhiteSpace(subject) ? "NoSubject" : subject.Trim();
+
+            foreach (char invalidCharacter in Path.GetInvalidFileNameChars())
+            {
+                safeSubject = safeSubject.Replace(invalidCharacter, '_');
+            }
+
+            // Outlook/Windows 互換のため追加で置換
+            safeSubject = safeSubject.Replace('[', '_')
+                                     .Replace(']', '_')
+                                     .Replace('#', '_');
+
+            if (safeSubject.Length > 120)
+            {
+                safeSubject = safeSubject.Substring(0, 120);
+            }
+
+            if (string.IsNullOrWhiteSpace(safeSubject))
+            {
+                safeSubject = "NoSubject";
+            }
+
+            return timestamp + "_" + safeSubject + ".zip";
+        }
+
+        private void CreatePasswordProtectedZip(IList<AttachmentUploadInfo> sourceAttachments, string zipFilePath, string zipPassword)
+        {
+            using (FileStream fileStream = File.Create(zipFilePath))
+            using (ZipOutputStream zipStream = new ZipOutputStream(fileStream))
+            {
+                zipStream.SetLevel(9);
+                zipStream.Password = zipPassword;
+                zipStream.UseZip64 = UseZip64.Off;
+
+                foreach (AttachmentUploadInfo attachment in sourceAttachments)
+                {
+                    string rawEntryName = Path.GetFileName(attachment.TemporaryFilePath);
+                    string entryName = this.NormalizeZipEntryNameToAscii
+                        ? this.NormalizeEntryNameForLegacyTools(rawEntryName)
+                        : ZipEntry.CleanName(rawEntryName);
+
+                    ZipEntry entry = new ZipEntry(entryName)
+                    {
+                        DateTime = DateTime.Now,
+                        IsUnicodeText = !this.NormalizeZipEntryNameToAscii
+                    };
+
+                    if (this.UseAesZipEncryption)
+                    {
+                        entry.AESKeySize = 256;
+                    }
+
+                    zipStream.PutNextEntry(entry);
+                    using (FileStream inputStream = File.OpenRead(attachment.TemporaryFilePath))
+                    {
+                        inputStream.CopyTo(zipStream);
+                    }
+                    zipStream.CloseEntry();
+                }
+
+                zipStream.IsStreamOwner = true;
+                zipStream.Finish();
+            }
+
+            if (this.ValidateZipAfterCreate)
+            {
+                this.VerifyPasswordZip(zipFilePath, zipPassword);
+            }
+        }
+
+        private string NormalizeEntryNameForLegacyTools(string fileName)
+        {
+            string candidate = ZipEntry.CleanName(fileName ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return "attachment.bin";
+            }
+
+            StringBuilder builder = new StringBuilder(candidate.Length);
+            for (int i = 0; i < candidate.Length; i++)
+            {
+                char c = candidate[i];
+                bool keep =
+                    (c >= 'A' && c <= 'Z') ||
+                    (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') ||
+                    c == '.' || c == '_' || c == '-' || c == '(' || c == ')' || c == ' ';
+                builder.Append(keep ? c : '_');
+            }
+
+            string normalized = builder.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                normalized = "attachment.bin";
+            }
+
+            return normalized;
+        }
+
+        private void VerifyPasswordZip(string zipFilePath, string zipPassword)
+        {
+            try
+            {
+                using (FileStream zipStream = File.OpenRead(zipFilePath))
+                using (ZipFile zipFile = new ZipFile(zipStream))
+                {
+                    zipFile.Password = zipPassword;
+
+                    foreach (ZipEntry entry in zipFile)
+                    {
+                        if (entry == null || !entry.IsFile)
+                        {
+                            continue;
+                        }
+
+                        using (Stream entryStream = zipFile.GetInputStream(entry))
+                        {
+                            byte[] buffer = new byte[1];
+                            entryStream.Read(buffer, 0, 1);
+                        }
+                    }
+                }
+
+                WriteLog("VerifyPasswordZip: 検証成功 Path=" + zipFilePath);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("作成した Zip ファイルの整合性検証に失敗しました。", ex);
+            }
+        }
+
+        private void CreatePasswordNotificationDraft(MailSendOperationContext operationContext)
+        {
+            Outlook.MailItem draftMail = null;
+            try
+            {
+                draftMail = this.Application.CreateItem(Outlook.OlItemType.olMailItem) as Outlook.MailItem;
+                if (draftMail == null)
+                {
+                    return;
+                }
+
+                draftMail.Subject = "【PW通知】" + (operationContext.Subject ?? string.Empty);
+                draftMail.To = this.NormalizeRecipientAddressList(operationContext.OriginalTo);
+                draftMail.CC = this.NormalizeRecipientAddressList(operationContext.OriginalCc);
+                draftMail.BCC = this.NormalizeRecipientAddressList(operationContext.OriginalBcc);
+
+                string passwordText = operationContext.ZipPassword ?? string.Empty;
+
+                if (operationContext.OriginalBodyFormat == Outlook.OlBodyFormat.olFormatHTML)
+                {
+                    string existingHtml = draftMail.HTMLBody ?? string.Empty;
+                    string htmlTop =
+                        "<div>先程送信しましたメール添付ファイルのPWをお知らせいたします。<br />" +
+                        System.Security.SecurityElement.Escape(passwordText) + "<br />" +
+                        "※本Zipファイルは、Googleドライブより添付ファイルをダウンロードした後に必要となります。" +
+                        "</div><br />";
+                    draftMail.HTMLBody = htmlTop + existingHtml;
+                }
+                else
+                {
+                    string bodyTop =
+                        "先程送信しましたメール添付ファイルのPWをお知らせいたします。" + Environment.NewLine +
+                        passwordText + Environment.NewLine +
+                        "※本Zipファイルは、Googleドライブより添付ファイルをダウンロードした後に必要となります。" +
+                        Environment.NewLine + Environment.NewLine;
+
+                    string existingBody = draftMail.Body ?? string.Empty;
+                    draftMail.Body = bodyTop + existingBody;
+                }
+
+                draftMail.Save();
+                WriteLog("CreatePasswordNotificationDraft: 下書き保存完了 Subject=" + draftMail.Subject);
+            }
+            catch (Exception ex)
+            {
+                WriteLog("CreatePasswordNotificationDraft: 例外 → " + ex.Message + " | " + ex.GetType().Name);
+                MessageBox.Show(
+                    "PW通知メールの下書き作成に失敗しました。" + Environment.NewLine + ex.Message,
+                    "下書き作成エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                if (draftMail != null)
+                {
+                    Marshal.ReleaseComObject(draftMail);
+                }
+            }
+        }
+
+        private string NormalizeRecipientAddressList(string addressList)
+        {
+            if (string.IsNullOrWhiteSpace(addressList))
+            {
+                return string.Empty;
+            }
+
+            string[] tokens = addressList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            List<string> normalizedTokens = new List<string>();
+
+            foreach (string token in tokens)
+            {
+                string value = token.Trim();
+                if (value.Length == 0)
+                {
+                    continue;
+                }
+
+                if ((value.StartsWith("'", StringComparison.Ordinal) && value.EndsWith("'", StringComparison.Ordinal)) ||
+                    (value.StartsWith("\"", StringComparison.Ordinal) && value.EndsWith("\"", StringComparison.Ordinal)))
+                {
+                    if (value.Length > 1)
+                    {
+                        value = value.Substring(1, value.Length - 2).Trim();
+                    }
+                }
+
+                normalizedTokens.Add(value);
+            }
+
+            return string.Join("; ", normalizedTokens);
+        }
+
         private bool CanSendAsAttachmentWithinConfiguredLimit(Outlook.MailItem mailItem, out string validationMessage)
         {
             validationMessage = string.Empty;
@@ -650,9 +1002,6 @@ namespace UNF_MailFile_GDUpload
 
             long totalAttachmentBytes = this.CalculateTotalAttachmentSizeBytes(mailItem);
             long limitBytes = configuredLimitKb * 1024L;
-
-            WriteLog("CanSendAsAttachmentWithinConfiguredLimit: 合計添付=" + totalAttachmentBytes + " bytes, 制限=" + limitBytes + " bytes");
-
             if (totalAttachmentBytes <= limitBytes)
             {
                 return true;
@@ -671,7 +1020,6 @@ namespace UNF_MailFile_GDUpload
         private bool TryGetConfiguredMaximumAttachmentSizeKb(out long sizeKb)
         {
             sizeKb = 0;
-
             try
             {
                 if (this.hadMaximumAttachmentSizeValue && this.originalMaximumAttachmentSizeValue != null)
@@ -687,12 +1035,7 @@ namespace UNF_MailFile_GDUpload
 
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(this.outlookPreferencesRegistryPath, false))
                 {
-                    if (key == null)
-                    {
-                        return false;
-                    }
-
-                    object currentValue = key.GetValue(OutlookMaximumAttachmentSizeValueName, null);
+                    object currentValue = key?.GetValue(OutlookMaximumAttachmentSizeValueName, null);
                     if (currentValue == null)
                     {
                         return false;
@@ -702,9 +1045,8 @@ namespace UNF_MailFile_GDUpload
                     return true;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                WriteLog("TryGetConfiguredMaximumAttachmentSizeKb: 例外 → " + ex.Message);
                 sizeKb = 0;
                 return false;
             }
@@ -714,13 +1056,10 @@ namespace UNF_MailFile_GDUpload
         {
             long totalBytes = 0;
             Outlook.Attachments attachments = null;
-
             try
             {
                 attachments = mailItem.Attachments;
-                int count = attachments.Count;
-
-                for (int index = 1; index <= count; index++)
+                for (int index = 1; index <= attachments.Count; index++)
                 {
                     Outlook.Attachment attachment = null;
                     try
@@ -730,19 +1069,13 @@ namespace UNF_MailFile_GDUpload
                     }
                     finally
                     {
-                        if (attachment != null)
-                        {
-                            Marshal.ReleaseComObject(attachment);
-                        }
+                        if (attachment != null) Marshal.ReleaseComObject(attachment);
                     }
                 }
             }
             finally
             {
-                if (attachments != null)
-                {
-                    Marshal.ReleaseComObject(attachments);
-                }
+                if (attachments != null) Marshal.ReleaseComObject(attachments);
             }
 
             return totalBytes;
@@ -754,21 +1087,9 @@ namespace UNF_MailFile_GDUpload
             const double mb = kb * 1024d;
             const double gb = mb * 1024d;
 
-            if (bytes >= gb)
-            {
-                return (bytes / gb).ToString("0.00") + " GB";
-            }
-
-            if (bytes >= mb)
-            {
-                return (bytes / mb).ToString("0.00") + " MB";
-            }
-
-            if (bytes >= kb)
-            {
-                return (bytes / kb).ToString("0.00") + " KB";
-            }
-
+            if (bytes >= gb) return (bytes / gb).ToString("0.00") + " GB";
+            if (bytes >= mb) return (bytes / mb).ToString("0.00") + " MB";
+            if (bytes >= kb) return (bytes / kb).ToString("0.00") + " KB";
             return bytes + " bytes";
         }
 
@@ -784,7 +1105,6 @@ namespace UNF_MailFile_GDUpload
             string extension = Path.GetExtension(candidateFileName);
             string fullPath = Path.Combine(directoryPath, candidateFileName);
             int sequence = 1;
-
             while (File.Exists(fullPath))
             {
                 candidateFileName = fileNameWithoutExtension + "_" + sequence.ToString() + extension;
@@ -805,10 +1125,7 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (userProperty != null)
-                {
-                    Marshal.ReleaseComObject(userProperty);
-                }
+                if (userProperty != null) Marshal.ReleaseComObject(userProperty);
             }
         }
 
@@ -822,10 +1139,7 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (userProperty != null)
-                {
-                    Marshal.ReleaseComObject(userProperty);
-                }
+                if (userProperty != null) Marshal.ReleaseComObject(userProperty);
             }
         }
 
@@ -840,10 +1154,7 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (userProperty != null)
-                {
-                    Marshal.ReleaseComObject(userProperty);
-                }
+                if (userProperty != null) Marshal.ReleaseComObject(userProperty);
             }
         }
 
@@ -860,10 +1171,7 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (userProperty != null)
-                {
-                    Marshal.ReleaseComObject(userProperty);
-                }
+                if (userProperty != null) Marshal.ReleaseComObject(userProperty);
             }
         }
 
@@ -878,10 +1186,7 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (userProperty != null)
-                {
-                    Marshal.ReleaseComObject(userProperty);
-                }
+                if (userProperty != null) Marshal.ReleaseComObject(userProperty);
             }
         }
 
@@ -890,7 +1195,6 @@ namespace UNF_MailFile_GDUpload
             Outlook.Explorer activeExplorer = null;
             CommandBars commandBars = null;
             CommandBar targetCommandBar = null;
-
             try
             {
                 activeExplorer = this.Application.ActiveExplorer();
@@ -917,20 +1221,9 @@ namespace UNF_MailFile_GDUpload
             }
             finally
             {
-                if (targetCommandBar != null)
-                {
-                    Marshal.ReleaseComObject(targetCommandBar);
-                }
-
-                if (commandBars != null)
-                {
-                    Marshal.ReleaseComObject(commandBars);
-                }
-
-                if (activeExplorer != null)
-                {
-                    Marshal.ReleaseComObject(activeExplorer);
-                }
+                if (targetCommandBar != null) Marshal.ReleaseComObject(targetCommandBar);
+                if (commandBars != null) Marshal.ReleaseComObject(commandBars);
+                if (activeExplorer != null) Marshal.ReleaseComObject(activeExplorer);
             }
         }
 
@@ -972,10 +1265,6 @@ namespace UNF_MailFile_GDUpload
 
         #region VSTO generated code
 
-        /// <summary>
-        /// Required method for designer support.
-        /// Do not modify the contents of this method with the code editor.
-        /// </summary>
         private void InternalStartup()
         {
             this.Startup += new EventHandler(ThisAddIn_Startup);
@@ -1003,7 +1292,6 @@ namespace UNF_MailFile_GDUpload
                         File.Delete(DiagnosticLogPath);
                     }
 
-                    // FileShare.ReadWrite を指定することで、ログビューアが開いている場合でも書き込めるようにする
                     using (FileStream stream = new FileStream(DiagnosticLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                     using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8))
                     {
@@ -1104,7 +1392,7 @@ namespace UNF_MailFile_GDUpload
             }
             catch (Exception ex)
             {
-                WriteLog("RestoreOutlookAttachmentLimit: 例外 → " + ex.Message);
+                WriteLog("RestoreOutlookAttachmentSize: 例外 → " + ex.Message);
             }
             finally
             {
@@ -1125,16 +1413,223 @@ namespace UNF_MailFile_GDUpload
         private sealed class MailSendOperationContext
         {
             public string OperationId { get; set; }
-
+            public SendProcessingMode Mode { get; set; }
             public Outlook.MailItem MailItem { get; set; }
-
             public string Subject { get; set; }
-
             public List<AttachmentUploadInfo> Attachments { get; set; }
-
+            public List<AttachmentUploadInfo> OriginalAttachments { get; set; }
+            public string ZipPassword { get; set; }
+            public string ZipFileName { get; set; }
+            public string OriginalTo { get; set; }
+            public string OriginalCc { get; set; }
+            public string OriginalBcc { get; set; }
+            public Outlook.OlBodyFormat OriginalBodyFormat { get; set; }
             public string TemporaryRootDirectory { get; set; }
-
             public UploadProgressForm ProgressForm { get; set; }
+        }
+
+        private SendProcessingMode PromptSendProcessingMode()
+        {
+            using (SendModeSelectionForm dialog = new SendModeSelectionForm())
+            {
+                IntPtr ownerHandle = GetForegroundWindow();
+                DialogResult result = ownerHandle != IntPtr.Zero
+                    ? dialog.ShowDialog(new Win32Window(ownerHandle))
+                    : dialog.ShowDialog();
+
+                if (result == DialogResult.OK && dialog.SelectedMode.HasValue)
+                {
+                    return dialog.SelectedMode.Value;
+                }
+            }
+
+            return (SendProcessingMode)(-1);
+        }
+
+        private bool ContainsPassThroughArchiveAttachment(IList<AttachmentUploadInfo> attachments)
+        {
+            foreach (AttachmentUploadInfo attachment in attachments)
+            {
+                string extension = Path.GetExtension(attachment.FileName) ?? string.Empty;
+                if (string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(extension, ".7z", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void ExecuteEncryptedZipAttachmentSend(MailSendOperationContext operationContext)
+        {
+            try
+            {
+                operationContext.ProgressForm?.UpdateStatus("暗号化Zipを添付中...");
+                this.RemoveUploadedAttachments(operationContext.MailItem, operationContext.OriginalAttachments ?? operationContext.Attachments);
+
+                string zipPath = operationContext.Attachments != null && operationContext.Attachments.Count > 0
+                    ? operationContext.Attachments[0].TemporaryFilePath
+                    : string.Empty;
+
+                if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
+                {
+                    throw new FileNotFoundException("作成したZipファイルが見つかりません。", zipPath);
+                }
+
+                Outlook.Attachment addedAttachment = null;
+                try
+                {
+                    addedAttachment = operationContext.MailItem.Attachments.Add(
+                        zipPath,
+                        Outlook.OlAttachmentType.olByValue,
+                        Type.Missing,
+                        operationContext.ZipFileName ?? Path.GetFileName(zipPath));
+                }
+                finally
+                {
+                    if (addedAttachment != null)
+                    {
+                        Marshal.ReleaseComObject(addedAttachment);
+                    }
+                }
+
+                string validationMessage;
+                if (!this.CanSendAsAttachmentWithinConfiguredLimit(operationContext.MailItem, out validationMessage))
+                {
+                    MessageBox.Show(validationMessage, "添付サイズ超過", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    this.ReleaseOperation(operationContext);
+                    return;
+                }
+
+                this.SetProcessingFlag(operationContext.MailItem, false);
+                this.MarkForSkipProcessing(operationContext.MailItem);
+                operationContext.MailItem.Save();
+
+                Control ctrl = this.marshalingControl;
+                if (ctrl != null && !ctrl.IsDisposed && ctrl.IsHandleCreated)
+                {
+                    ctrl.BeginInvoke(new Action(() => this.CompleteEncryptedZipAttachmentSend(operationContext)));
+                }
+                else
+                {
+                    // フォールバック（通常は通らない）
+                    this.CompleteEncryptedZipAttachmentSend(operationContext);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog("ExecuteEncryptedZipAttachmentSend: 例外 → " + ex.Message);
+                MessageBox.Show(
+                    "暗号化Zip添付送信に失敗しました。" + Environment.NewLine + ex.Message,
+                    "送信エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                this.ReleaseOperation(operationContext);
+            }
+        }
+
+        private void CompleteEncryptedZipAttachmentSend(MailSendOperationContext operationContext)
+        {
+            try
+            {
+                operationContext.MailItem.Send();
+                this.CreatePasswordNotificationDraft(operationContext);
+            }
+            catch (Exception ex)
+            {
+                WriteLog("CompleteEncryptedZipAttachmentSend: 例外 → " + ex.Message);
+                MessageBox.Show(
+                    "暗号化Zip添付送信に失敗しました。" + Environment.NewLine + ex.Message,
+                    "送信エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                this.ReleaseOperation(operationContext);
+            }
+        }
+
+        private sealed class SendModeSelectionForm : Form
+        {
+            private readonly Button btnGoogleDrive;
+            private readonly Button btnEncryptedZip;
+            private readonly Button btnCancel;
+
+            internal SendProcessingMode? SelectedMode { get; private set; }
+
+            internal SendModeSelectionForm()
+            {
+                this.Text = "送信方法の選択";
+                this.FormBorderStyle = FormBorderStyle.FixedDialog;
+                this.StartPosition = FormStartPosition.CenterParent;
+                this.MaximizeBox = false;
+                this.MinimizeBox = false;
+                this.ShowInTaskbar = false;
+                this.ClientSize = new System.Drawing.Size(520, 170);
+
+                Label lblMessage = new Label
+                {
+                    AutoSize = false,
+                    Left = 16,
+                    Top = 16,
+                    Width = 488,
+                    Height = 56,
+                    Text = "送信方法を選択してください。",
+                    TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+                };
+
+                this.btnGoogleDrive = new Button
+                {
+                    Left = 16,
+                    Top = 86,
+                    Width = 238,
+                    Height = 34,
+                    Text = "Googleドライブに格納して送信"
+                };
+                this.btnGoogleDrive.Click += this.BtnGoogleDrive_Click;
+
+                this.btnEncryptedZip = new Button
+                {
+                    Left = 266,
+                    Top = 86,
+                    Width = 238,
+                    Height = 34,
+                    Text = "暗号化Zipを作成して添付送信"
+                };
+                this.btnEncryptedZip.Click += this.BtnEncryptedZip_Click;
+
+                this.btnCancel = new Button
+                {
+                    Left = 390,
+                    Top = 132,
+                    Width = 114,
+                    Height = 28,
+                    Text = "キャンセル",
+                    DialogResult = DialogResult.Cancel
+                };
+
+                this.CancelButton = this.btnCancel;
+                this.Controls.Add(lblMessage);
+                this.Controls.Add(this.btnGoogleDrive);
+                this.Controls.Add(this.btnEncryptedZip);
+                this.Controls.Add(this.btnCancel);
+            }
+
+            private void BtnGoogleDrive_Click(object sender, EventArgs e)
+            {
+                this.SelectedMode = SendProcessingMode.GoogleDrive;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            }
+
+            private void BtnEncryptedZip_Click(object sender, EventArgs e)
+            {
+                this.SelectedMode = SendProcessingMode.EncryptedZipAttachment;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            }
         }
     }
 }

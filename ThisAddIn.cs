@@ -543,12 +543,14 @@ namespace UNF_MailFile_GDUpload
             string normalizedUrl = string.IsNullOrWhiteSpace(folderUrl)
                 ? string.Empty
                 : folderUrl.Trim();
+            string expirationDateText = DateTime.Now.Date.AddDays(6).ToString("yyyy/MM/dd");
 
             const string separator = "************************************************";
             string plainPrefix = separator + Environment.NewLine +
                                   "本メールの添付ファイルは、" + Environment.NewLine +
                                   "下記URLより確認・ダウンロードをお願いいたします。" + Environment.NewLine +
                                   normalizedUrl + Environment.NewLine +
+                                  "※上記URLの有効期限は、" + expirationDateText + " です。（送信日含めて7日間です。）" + Environment.NewLine +
                                   separator + Environment.NewLine + Environment.NewLine;
 
             string htmlPrefix = "<div style=\"margin-bottom:12px;font-family:monospace;\">" +
@@ -557,6 +559,7 @@ namespace UNF_MailFile_GDUpload
                                  "下記URLより確認・ダウンロードをお願いいたします。<br />" +
                                  "<a href=\"" + System.Security.SecurityElement.Escape(normalizedUrl) + "\">" +
                                  System.Security.SecurityElement.Escape(normalizedUrl) + "</a><br />" +
+                                 "※上記URLの有効期限は、" + System.Security.SecurityElement.Escape(expirationDateText) + " です。（送信日含めて7日間です。）<br />" +
                                  separator +
                                  "</div>";
 

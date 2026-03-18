@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Office.Core;
+using Microsoft.Win32;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace UNF_MailFile_GDUpload
@@ -16,6 +17,7 @@ namespace UNF_MailFile_GDUpload
     {
         private const string SkipProcessingUserPropertyName = "UNFGDUploadSkip";
         private const string ProcessingUserPropertyName = "UNFGDUploadProcessing";
+        private const string OutlookMaximumAttachmentSizeValueName = "MaximumAttachmentSize";
         private const string AttachmentHiddenPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B";
         private const string AttachmentContentIdPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x3712001F";
         private const string AttachmentFlagsPropertyTag = "http://schemas.microsoft.com/mapi/proptag/0x37140003";
@@ -33,6 +35,12 @@ namespace UNF_MailFile_GDUpload
         private GoogleDriveService googleDriveService;
         private CommandBarButton settingsCommandBarButton;
 
+        private string outlookPreferencesRegistryPath;
+        private object originalMaximumAttachmentSizeValue;
+        private RegistryValueKind? originalMaximumAttachmentSizeValueKind;
+        private bool hadMaximumAttachmentSizeValue;
+        private bool attachmentLimitOverrideApplied;
+
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
             // UI スレッドで WinForms コントロールを生成し、BeginInvoke による
@@ -44,6 +52,7 @@ namespace UNF_MailFile_GDUpload
             this.googleDriveService = new GoogleDriveService();
             this.Application.ItemSend += this.Application_ItemSend;
             this.CreateSettingsCommandBarButton();
+            this.TryDisableOutlookAttachmentLimit();
 
             WriteLog("=== Startup: アドイン起動 HasClientConfig=" + this.googleDriveService.HasRequiredClientConfiguration()
                 + " RootFolderId=" + (string.IsNullOrWhiteSpace(Properties.Settings.Default.GoogleDriveRootFolderId) ? "(未設定)" : "設定済み") + " ===");
@@ -58,6 +67,7 @@ namespace UNF_MailFile_GDUpload
         {
             this.Application.ItemSend -= this.Application_ItemSend;
             this.RemoveSettingsCommandBarButton();
+            this.RestoreOutlookAttachmentLimit();
 
             if (this.marshalingControl != null)
             {
@@ -286,10 +296,23 @@ namespace UNF_MailFile_GDUpload
             {
                 try
                 {
-                    this.SetProcessingFlag(operationContext.MailItem, false);
-                    this.MarkForSkipProcessing(operationContext.MailItem);
-                    operationContext.MailItem.Save();
-                    operationContext.MailItem.Send();
+                    string validationMessage;
+                    if (!this.CanSendAsAttachmentWithinConfiguredLimit(operationContext.MailItem, out validationMessage))
+                    {
+                        WriteLog("HandleMailSendFailure: 添付サイズ超過のため送信中止");
+                        MessageBox.Show(
+                            validationMessage,
+                            "添付サイズ超過",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                    }
+                    else
+                    {
+                        this.SetProcessingFlag(operationContext.MailItem, false);
+                        this.MarkForSkipProcessing(operationContext.MailItem);
+                        operationContext.MailItem.Save();
+                        operationContext.MailItem.Send();
+                    }
                 }
                 catch (Exception sendEx)
                 {
@@ -520,12 +543,14 @@ namespace UNF_MailFile_GDUpload
             string normalizedUrl = string.IsNullOrWhiteSpace(folderUrl)
                 ? string.Empty
                 : folderUrl.Trim();
+            string expirationDateText = DateTime.Now.Date.AddDays(6).ToString("yyyy/MM/dd");
 
             const string separator = "************************************************";
             string plainPrefix = separator + Environment.NewLine +
                                   "本メールの添付ファイルは、" + Environment.NewLine +
                                   "下記URLより確認・ダウンロードをお願いいたします。" + Environment.NewLine +
                                   normalizedUrl + Environment.NewLine +
+                                  "※上記URLの有効期限は、" + expirationDateText + " です。（送信日含めて7日間です。）" + Environment.NewLine +
                                   separator + Environment.NewLine + Environment.NewLine;
 
             string htmlPrefix = "<div style=\"margin-bottom:12px;font-family:monospace;\">" +
@@ -534,6 +559,7 @@ namespace UNF_MailFile_GDUpload
                                  "下記URLより確認・ダウンロードをお願いいたします。<br />" +
                                  "<a href=\"" + System.Security.SecurityElement.Escape(normalizedUrl) + "\">" +
                                  System.Security.SecurityElement.Escape(normalizedUrl) + "</a><br />" +
+                                 "※上記URLの有効期限は、" + System.Security.SecurityElement.Escape(expirationDateText) + " です。（送信日含めて7日間です。）<br />" +
                                  separator +
                                  "</div>";
 
@@ -609,6 +635,141 @@ namespace UNF_MailFile_GDUpload
                     Marshal.ReleaseComObject(outlookAttachments);
                 }
             }
+        }
+
+        private bool CanSendAsAttachmentWithinConfiguredLimit(Outlook.MailItem mailItem, out string validationMessage)
+        {
+            validationMessage = string.Empty;
+
+            long configuredLimitKb;
+            if (!this.TryGetConfiguredMaximumAttachmentSizeKb(out configuredLimitKb) || configuredLimitKb <= 0)
+            {
+                WriteLog("CanSendAsAttachmentWithinConfiguredLimit: MaximumAttachmentSize 未設定または無制限のためチェック不要");
+                return true;
+            }
+
+            long totalAttachmentBytes = this.CalculateTotalAttachmentSizeBytes(mailItem);
+            long limitBytes = configuredLimitKb * 1024L;
+
+            WriteLog("CanSendAsAttachmentWithinConfiguredLimit: 合計添付=" + totalAttachmentBytes + " bytes, 制限=" + limitBytes + " bytes");
+
+            if (totalAttachmentBytes <= limitBytes)
+            {
+                return true;
+            }
+
+            validationMessage =
+                "添付ファイルをそのまま送信しようとしましたが、" + Environment.NewLine +
+                "添付合計サイズが Outlook の上限を超えています。" + Environment.NewLine + Environment.NewLine +
+                "上限: " + this.FormatSize(limitBytes) + Environment.NewLine +
+                "現在: " + this.FormatSize(totalAttachmentBytes) + Environment.NewLine + Environment.NewLine +
+                "Google Drive のアップロード再実行、または添付ファイルを減らして再送してください。";
+
+            return false;
+        }
+
+        private bool TryGetConfiguredMaximumAttachmentSizeKb(out long sizeKb)
+        {
+            sizeKb = 0;
+
+            try
+            {
+                if (this.hadMaximumAttachmentSizeValue && this.originalMaximumAttachmentSizeValue != null)
+                {
+                    sizeKb = Convert.ToInt64(this.originalMaximumAttachmentSizeValue);
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(this.outlookPreferencesRegistryPath))
+                {
+                    return false;
+                }
+
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(this.outlookPreferencesRegistryPath, false))
+                {
+                    if (key == null)
+                    {
+                        return false;
+                    }
+
+                    object currentValue = key.GetValue(OutlookMaximumAttachmentSizeValueName, null);
+                    if (currentValue == null)
+                    {
+                        return false;
+                    }
+
+                    sizeKb = Convert.ToInt64(currentValue);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog("TryGetConfiguredMaximumAttachmentSizeKb: 例外 → " + ex.Message);
+                sizeKb = 0;
+                return false;
+            }
+        }
+
+        private long CalculateTotalAttachmentSizeBytes(Outlook.MailItem mailItem)
+        {
+            long totalBytes = 0;
+            Outlook.Attachments attachments = null;
+
+            try
+            {
+                attachments = mailItem.Attachments;
+                int count = attachments.Count;
+
+                for (int index = 1; index <= count; index++)
+                {
+                    Outlook.Attachment attachment = null;
+                    try
+                    {
+                        attachment = attachments[index];
+                        totalBytes += attachment.Size;
+                    }
+                    finally
+                    {
+                        if (attachment != null)
+                        {
+                            Marshal.ReleaseComObject(attachment);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (attachments != null)
+                {
+                    Marshal.ReleaseComObject(attachments);
+                }
+            }
+
+            return totalBytes;
+        }
+
+        private string FormatSize(long bytes)
+        {
+            const double kb = 1024d;
+            const double mb = kb * 1024d;
+            const double gb = mb * 1024d;
+
+            if (bytes >= gb)
+            {
+                return (bytes / gb).ToString("0.00") + " GB";
+            }
+
+            if (bytes >= mb)
+            {
+                return (bytes / mb).ToString("0.00") + " MB";
+            }
+
+            if (bytes >= kb)
+            {
+                return (bytes / kb).ToString("0.00") + " KB";
+            }
+
+            return bytes + " bytes";
         }
 
         private string BuildUniqueSafeFileName(string directoryPath, string originalFileName)
@@ -867,6 +1028,87 @@ namespace UNF_MailFile_GDUpload
             }
             catch
             {
+            }
+        }
+
+        private void TryDisableOutlookAttachmentLimit()
+        {
+            try
+            {
+                string officeVersion = this.Application != null ? this.Application.Version : "16.0";
+                this.outlookPreferencesRegistryPath = @"Software\Microsoft\Office\" + officeVersion + @"\Outlook\Preferences";
+
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(this.outlookPreferencesRegistryPath, true))
+                {
+                    if (key == null)
+                    {
+                        WriteLog("TryDisableOutlookAttachmentLimit: レジストリキー作成/取得失敗");
+                        return;
+                    }
+
+                    object currentValue = key.GetValue(OutlookMaximumAttachmentSizeValueName, null);
+                    if (currentValue != null)
+                    {
+                        this.hadMaximumAttachmentSizeValue = true;
+                        this.originalMaximumAttachmentSizeValue = currentValue;
+                        this.originalMaximumAttachmentSizeValueKind = key.GetValueKind(OutlookMaximumAttachmentSizeValueName);
+                    }
+                    else
+                    {
+                        this.hadMaximumAttachmentSizeValue = false;
+                        this.originalMaximumAttachmentSizeValue = null;
+                        this.originalMaximumAttachmentSizeValueKind = null;
+                    }
+
+                    key.SetValue(OutlookMaximumAttachmentSizeValueName, 0, RegistryValueKind.DWord);
+                    this.attachmentLimitOverrideApplied = true;
+                }
+
+                WriteLog("TryDisableOutlookAttachmentLimit: MaximumAttachmentSize=0 を適用 Path=" + this.outlookPreferencesRegistryPath);
+            }
+            catch (Exception ex)
+            {
+                WriteLog("TryDisableOutlookAttachmentLimit: 例外 → " + ex.Message);
+            }
+        }
+
+        private void RestoreOutlookAttachmentLimit()
+        {
+            if (!this.attachmentLimitOverrideApplied || string.IsNullOrWhiteSpace(this.outlookPreferencesRegistryPath))
+            {
+                return;
+            }
+
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(this.outlookPreferencesRegistryPath, true))
+                {
+                    if (key == null)
+                    {
+                        return;
+                    }
+
+                    if (this.hadMaximumAttachmentSizeValue)
+                    {
+                        RegistryValueKind valueKind = this.originalMaximumAttachmentSizeValueKind ?? RegistryValueKind.DWord;
+                        object value = this.originalMaximumAttachmentSizeValue ?? 0;
+                        key.SetValue(OutlookMaximumAttachmentSizeValueName, value, valueKind);
+                        WriteLog("RestoreOutlookAttachmentLimit: MaximumAttachmentSize を元の値に復元");
+                    }
+                    else
+                    {
+                        key.DeleteValue(OutlookMaximumAttachmentSizeValueName, false);
+                        WriteLog("RestoreOutlookAttachmentLimit: MaximumAttachmentSize を削除（元々未設定）");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog("RestoreOutlookAttachmentLimit: 例外 → " + ex.Message);
+            }
+            finally
+            {
+                this.attachmentLimitOverrideApplied = false;
             }
         }
 

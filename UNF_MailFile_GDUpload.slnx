@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="UNF_MailFile_GDUpload.csproj">
+  <Project Path="UNF_MailFile_GDUpload.csproj" Id="7a59ef65-c8f4-40d6-9907-d357e543b348">
     <BuildType Project="Release" />
   </Project>
 </Solution>

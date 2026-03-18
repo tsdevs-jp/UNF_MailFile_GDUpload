@@ -25,3 +25,13 @@ C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.csproj.Co
 C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_Mail.7F7B219A.Up2Date
 C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.dll
 C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.pdb
+C:\Development\UNF_MailFile_GDUpload\bin\Release\ICSharpCode.SharpZipLib.dll
+C:\Development\UNF_MailFile_GDUpload\bin\Release\ICSharpCode.SharpZipLib.pdb
+C:\Development\UNF_MailFile_GDUpload\bin\Release\System.Buffers.dll
+C:\Development\UNF_MailFile_GDUpload\bin\Release\System.Memory.dll
+C:\Development\UNF_MailFile_GDUpload\bin\Release\System.Numerics.Vectors.dll
+C:\Development\UNF_MailFile_GDUpload\bin\Release\System.Runtime.CompilerServices.Unsafe.dll
+C:\Development\UNF_MailFile_GDUpload\bin\Release\System.Threading.Tasks.Extensions.dll
+C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.csproj.SuggestedBindingRedirects.cache
+C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.dll.config
+C:\Development\UNF_MailFile_GDUpload\obj\Release\UNF_MailFile_GDUpload.SettingsForm.resources
